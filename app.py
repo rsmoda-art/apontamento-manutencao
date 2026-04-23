@@ -7,7 +7,7 @@ import os
 # Configuração da Página
 st.set_page_config(page_title="Apontamento Raízen", page_icon="⚙️", layout="centered")
 
-# Caminho absoluto para garantir que salve no local correto
+# Caminho absoluto para o arquivo no servidor
 diretorio_atual = os.path.dirname(os.path.abspath(__file__))
 caminho_excel = os.path.join(diretorio_atual, "Manutencao_App.xlsx")
 
@@ -31,7 +31,7 @@ def converter_para_horas(txt_hora):
     except:
         return 0
 
-# --- DIALOG (POP-UP) DE RESUMO CORRIGIDO ---
+# --- DIALOG (POP-UP) DE RESUMO ---
 
 @st.dialog("Resumo de Apontamentos")
 def mostrar_resumo(colaborador, data_selecionada):
@@ -41,14 +41,11 @@ def mostrar_resumo(colaborador, data_selecionada):
 
     try:
         df_apont = pd.read_excel(caminho_excel, sheet_name="Apontamentos")
-        
-        # Sincronizado com o nome da coluna na sua foto: 'Data'
         df_apont['Data'] = pd.to_datetime(df_apont['Data'], dayfirst=True).dt.date
         
         filtro = df_apont[(df_apont['Colaborador'] == colaborador) & (df_apont['Data'] == data_selecionada)].copy()
 
         if not filtro.empty:
-            # Limpeza de formato para exibição
             filtro['Ordem'] = filtro['Ordem'].fillna(0).astype(int).astype(str)
             filtro['Operação'] = filtro['Operação'].fillna(0).astype(int).astype(str)
             
@@ -103,32 +100,22 @@ h_fim = c_h2.text_input("Fim (HH:MM)", placeholder="17:00")
 andamento = st.slider("Porcentagem Executada", 0, 100, step=5)
 descricao = st.text_area("Descrição da Atividade")
 
-# --- BOTÃO GRAVAR (REESCREVENDO O ARQUIVO COMPLETO) ---
+# --- BOTÃO GRAVAR ---
 
 if st.button("Gravar Apontamento", use_container_width=True):
     regex_hora = r"^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$"
-
     if not nome_atividade:
         st.error("Erro: Ordem inválida.")
     elif not re.match(regex_hora, h_inicio) or not re.match(regex_hora, h_fim):
         st.error("Formato de hora inválido.")
     else:
-        # Dicionário com nomes curtos idênticos à sua planilha
         novo_dado = {
-            "Oficina": [oficina], 
-            "Colaborador": [colaborador], 
-            "Ordem": [ordem_input],
-            "Operação": [operacao_input], 
-            "Data": [data_ativ.strftime('%d/%m/%Y')],
-            "Início": [h_inicio], 
-            "Fim": [h_fim], 
-            "Progresso": [f"{andamento}%"], 
-            "Descrição": [descricao]
+            "Oficina": [oficina], "Colaborador": [colaborador], "Ordem": [ordem_input],
+            "Operação": [operacao_input], "Data": [data_ativ.strftime('%d/%m/%Y')],
+            "Início": [h_inicio], "Fim": [h_fim], "Progresso": [f"{andamento}%"], "Descrição": [descricao]
         }
         df_novo = pd.DataFrame(novo_dado)
-        
         try:
-            # 1. Carrega todas as abas para não deletar nada por acidente
             with pd.ExcelFile(caminho_excel) as xls:
                 df_colab_orig = pd.read_excel(xls, "Colaboradores")
                 df_ordens_orig = pd.read_excel(xls, "BDOrdens")
@@ -137,22 +124,32 @@ if st.button("Gravar Apontamento", use_container_width=True):
                 except:
                     df_apont_atual = pd.DataFrame(columns=novo_dado.keys())
             
-            # 2. Adiciona o novo registro
             df_apont_final = pd.concat([df_apont_atual, df_novo], ignore_index=True)
-            
-            # Limpa lixo do PowerApps se houver
             if "__PowerAppsId__" in df_apont_final.columns:
                 df_apont_final = df_apont_final.drop(columns=["__PowerAppsId__"])
 
-            # 3. Salva o arquivo inteiro do zero (Sobrescrever)
             with pd.ExcelWriter(caminho_excel, engine="openpyxl") as writer:
                 df_apont_final.to_excel(writer, sheet_name="Apontamentos", index=False)
                 df_colab_orig.to_excel(writer, sheet_name="Colaboradores", index=False)
                 df_ordens_orig.to_excel(writer, sheet_name="BDOrdens", index=False)
             
             st.balloons()
-            st.success("Salvo com sucesso!")
-            st.cache_data.clear() # Força o app a ler o arquivo de novo no próximo resumo
-            
+            st.success("Salvo com sucesso no servidor!")
+            st.cache_data.clear()
         except Exception as e:
-            st.error(f"FECHE O EXCEL/OPENOFFICE! Erro: {e}")
+            st.error(f"Erro ao salvar: {e}")
+
+# --- BOTÃO DE DOWNLOAD (NOVIDADE) ---
+st.divider()
+st.subheader("📦 Gestão de Dados")
+try:
+    with open(caminho_excel, "rb") as f:
+        st.download_button(
+            label="📥 Baixar Planilha de Apontamentos Atualizada",
+            data=f,
+            file_name=f"Apontamentos_Manutencao_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+except Exception as e:
+    st.warning("Aguardando o primeiro apontamento para gerar o download.")
