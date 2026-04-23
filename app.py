@@ -7,7 +7,7 @@ import os
 # Configuração da Página
 st.set_page_config(page_title="Apontamento Raízen", page_icon="⚙️", layout="centered")
 
-# Descobrir o caminho real da pasta do script para não salvar em lugar errado
+# Caminho absoluto para garantir que o Python não salve em pastas temporárias
 diretorio_atual = os.path.dirname(os.path.abspath(__file__))
 caminho_excel = os.path.join(diretorio_atual, "Manutencao_App.xlsx")
 
@@ -16,6 +16,7 @@ caminho_excel = os.path.join(diretorio_atual, "Manutencao_App.xlsx")
 @st.cache_data
 def carregar_dados():
     try:
+        # Carregamos as abas de referência
         df_colab = pd.read_excel(caminho_excel, sheet_name="Colaboradores")
         df_ordens = pd.read_excel(caminho_excel, sheet_name="BDOrdens")
         df_colab.columns = df_colab.columns.str.strip()
@@ -40,14 +41,14 @@ def mostrar_resumo(colaborador, data_selecionada):
     st.divider()
 
     try:
-        # Lê o arquivo usando o caminho absoluto
         df_apont = pd.read_excel(caminho_excel, sheet_name="Apontamentos")
+        # Tratamento de data para comparação
         df_apont['Data Atividade'] = pd.to_datetime(df_apont['Data Atividade'], dayfirst=True).dt.date
         
         filtro = df_apont[(df_apont['Nome Colaborador'] == colaborador) & (df_apont['Data Atividade'] == data_selecionada)].copy()
 
         if not filtro.empty:
-            # Ajustando nomes para exibição baseada na sua foto
+            # Limpeza visual de números para o resumo
             filtro['Numero Ordem'] = filtro['Numero Ordem'].fillna(0).astype(int).astype(str)
             filtro['Operacao Ordem'] = filtro['Operacao Ordem'].fillna(0).astype(int).astype(str)
             
@@ -61,7 +62,7 @@ def mostrar_resumo(colaborador, data_selecionada):
             
             st.metric("Total de Horas no Dia", f"{total_horas:.2f} h")
         else:
-            st.info("Nenhum registro encontrado para hoje.")
+            st.info("Nenhum registro encontrado para este dia.")
     except Exception as e:
         st.error(f"Erro ao ler resumo: {e}")
 
@@ -102,7 +103,7 @@ h_fim = c_h2.text_input("Fim (HH:MM)", placeholder="17:00")
 andamento = st.slider("Porcentagem Executada", 0, 100, step=5)
 descricao = st.text_area("Descrição da Atividade")
 
-# --- BOTÃO GRAVAR COM NOMES DE COLUNAS IGUAIS À SUA FOTO ---
+# --- BOTÃO GRAVAR (VERSÃO REESCRITA COMPLETA) ---
 
 if st.button("Gravar Apontamento", use_container_width=True):
     regex_hora = r"^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$"
@@ -112,7 +113,6 @@ if st.button("Gravar Apontamento", use_container_width=True):
     elif not re.match(regex_hora, h_inicio) or not re.match(regex_hora, h_fim):
         st.error("Formato de hora inválido.")
     else:
-        # IMPORTANTE: Usei os nomes EXATOS da sua foto do Excel
         novo_dado = {
             "Oficina": [oficina], 
             "Nome Colaborador": [colaborador], 
@@ -127,25 +127,32 @@ if st.button("Gravar Apontamento", use_container_width=True):
         df_novo = pd.DataFrame(novo_dado)
         
         try:
-            # Tenta ler a aba do arquivo correto
-            try:
-                df_atual = pd.read_excel(caminho_excel, sheet_name="Apontamentos")
-            except:
-                df_atual = pd.DataFrame(columns=novo_dado.keys())
+            # 1. Carregamos TODAS as abas para não perder dados
+            with pd.ExcelFile(caminho_excel) as xls:
+                df_colab_orig = pd.read_excel(xls, "Colaboradores")
+                df_ordens_orig = pd.read_excel(xls, "BDOrdens")
+                try:
+                    df_apont_atual = pd.read_excel(xls, "Apontamentos")
+                except:
+                    df_apont_atual = pd.DataFrame(columns=novo_dado.keys())
             
-            df_final = pd.concat([df_atual, df_novo], ignore_index=True)
+            # 2. Concatenamos os novos dados
+            df_apont_final = pd.concat([df_apont_atual, df_novo], ignore_index=True)
             
-            # Remove a coluna do PowerApps se ela aparecer para limpar a planilha
-            if "__PowerAppsId__" in df_final.columns:
-                df_final = df_final.drop(columns=["__PowerAppsId__"])
+            # Limpeza da coluna do PowerApps
+            if "__PowerAppsId__" in df_apont_final.columns:
+                df_apont_final = df_apont_final.drop(columns=["__PowerAppsId__"])
 
-            # Grava no caminho absoluto
-            with pd.ExcelWriter(caminho_excel, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
-                df_final.to_excel(writer, sheet_name="Apontamentos", index=False)
+            # 3. Reescrevemos o arquivo inteiro com todas as abas
+            # Isso mata o problema de permissão do ExcelWriter modo append
+            with pd.ExcelWriter(caminho_excel, engine="openpyxl") as writer:
+                df_apont_final.to_excel(writer, sheet_name="Apontamentos", index=False)
+                df_colab_orig.to_excel(writer, sheet_name="Colaboradores", index=False)
+                df_ordens_orig.to_excel(writer, sheet_name="BDOrdens", index=False)
             
             st.balloons()
-            st.success("Salvo no Excel com sucesso!")
-            st.cache_data.clear()
+            st.success("Salvo com sucesso! O arquivo foi atualizado.")
+            st.cache_data.clear() # Limpa o cache para atualizar o resumo
             
         except Exception as e:
-            st.error(f"FECHE O EXCEL! O Python não consegue salvar com o arquivo aberto. Erro: {e}")
+            st.error(f"ERRO CRÍTICO: Certifique-se de que o Excel está FECHADO. Erro: {e}")
