@@ -30,7 +30,7 @@ def converter_para_horas(txt_hora):
     except:
         return 0
 
-# --- DIALOG (POP-UP) DE RESUMO ATUALIZADO ---
+# --- DIALOG (POP-UP) DE RESUMO ---
 
 @st.dialog("Resumo de Apontamentos")
 def mostrar_resumo(colaborador, data_selecionada):
@@ -42,17 +42,16 @@ def mostrar_resumo(colaborador, data_selecionada):
 
     try:
         df_apont = pd.read_excel("Manutencao_App.xlsx", sheet_name="Apontamentos")
+        # Converte Data garantindo que o formato seja comparável
         df_apont['Data'] = pd.to_datetime(df_apont['Data'], dayfirst=True).dt.date
         
         filtro = df_apont[(df_apont['Colaborador'] == colaborador) & (df_apont['Data'] == data_selecionada)].copy()
 
         if not filtro.empty:
-            # CORREÇÃO: Converter Ordem e Operação para inteiros e depois para texto
-            # Isso remove o .0 e as vírgulas de milhar
+            # Formata Ordem e Operação para Texto Inteiro (sem vírgulas ou .0)
             filtro['Ordem'] = filtro['Ordem'].fillna(0).astype(int).astype(str)
             filtro['Operação'] = filtro['Operação'].fillna(0).astype(int).astype(str)
             
-            # Exibe a tabela formatada
             st.table(filtro[['Ordem', 'Operação', 'Início', 'Fim', 'Progresso']])
             
             total_horas = 0
@@ -64,8 +63,8 @@ def mostrar_resumo(colaborador, data_selecionada):
             st.metric("Total de Horas Apontadas no Dia", f"{total_horas:.2f} h")
         else:
             st.info(f"Nenhum registro encontrado para {data_formatada_br}.")
-    except Exception as e:
-        st.error(f"Erro ao ler resumo: {e}")
+    except Exception:
+        st.info("Aba de Apontamentos está vazia ou ainda não foi criada.")
 
 # --- INTERFACE PRINCIPAL ---
 
@@ -111,6 +110,8 @@ h_fim = c_h2.text_input("Fim (HH:MM)", placeholder="00:00")
 andamento = st.slider("Porcentagem Executada", 0, 100, step=5)
 descricao = st.text_area("Descrição da Atividade")
 
+# --- BOTÃO GRAVAR (VERSÃO CORRIGIDA) ---
+
 if st.button("Gravar Apontamento", use_container_width=True):
     regex_hora = r"^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$"
 
@@ -119,17 +120,42 @@ if st.button("Gravar Apontamento", use_container_width=True):
     elif not re.match(regex_hora, h_inicio) or not re.match(regex_hora, h_fim):
         st.error("Formato de hora inválido.")
     else:
+        # Prepara a nova linha
         novo_dado = {
-            "Oficina": [oficina], "Colaborador": [colaborador], "Ordem": [ordem_input],
-            "Operação": [operacao_input], "Data": [data_ativ.strftime('%d/%m/%Y')],
-            "Início": [h_inicio], "Fim": [h_fim], "Progresso": [f"{andamento}%"], "Descrição": [descricao]
+            "Oficina": [oficina], 
+            "Colaborador": [colaborador], 
+            "Ordem": [ordem_input],
+            "Operação": [operacao_input], 
+            "Data": [data_ativ.strftime('%d/%m/%Y')],
+            "Início": [h_inicio], 
+            "Fim": [h_fim], 
+            "Progresso": [f"{andamento}%"], 
+            "Descrição": [descricao]
         }
+        df_novo = pd.DataFrame(novo_dado)
+        
         try:
-            df_atual = pd.read_excel("Manutencao_App.xlsx", sheet_name="Apontamentos")
-            df_final = pd.concat([df_atual, pd.DataFrame(novo_dado)], ignore_index=True)
+            # Tenta ler a planilha; se falhar ou estiver vazia, cria a estrutura do zero
+            try:
+                df_atual = pd.read_excel("Manutencao_App.xlsx", sheet_name="Apontamentos")
+            except Exception:
+                df_atual = pd.DataFrame(columns=novo_dado.keys())
+            
+            # Garante que mesmo se a aba existir mas estiver sem dados, o código funcione
+            if df_atual.empty:
+                df_final = df_novo
+            else:
+                df_final = pd.concat([df_atual, df_novo], ignore_index=True)
+            
+            # Grava no Excel
             with pd.ExcelWriter("Manutencao_App.xlsx", engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
                 df_final.to_excel(writer, sheet_name="Apontamentos", index=False)
+            
             st.balloons()
             st.success("Registrado com sucesso!")
-        except:
-            st.error("Erro ao salvar. Verifique se o Excel está aberto.")
+            
+            # IMPORTANTE: Limpa o cache para o resumo atualizar na hora
+            st.cache_data.clear()
+            
+        except Exception as e:
+            st.error(f"Erro ao salvar: Verifique se o Excel está aberto! Erro: {e}")
