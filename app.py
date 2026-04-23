@@ -79,13 +79,28 @@ col1, col2 = st.columns(2)
 ordem_input = col1.text_input("Número da Ordem", max_chars=8)
 operacao_input = col2.text_input("Operação", max_chars=3)
 
+# --- LÓGICA DE VALIDAÇÃO DE ORDEM ---
 nome_atividade = ""
-if ordem_input and operacao_input:
-    res = df_ordens[(df_ordens['Ordem'].astype(str).str.strip() == ordem_input.strip()) & 
-                    (df_ordens['Operação'].astype(str).str.strip() == operacao_input.strip())]
-    if not res.empty:
-        nome_atividade = res['Txt.breve operação'].values[0]
-        st.success(f"📌 Atividade: {nome_atividade}")
+ordem_valida_por_faixa = False
+
+if ordem_input:
+    # 1. Verifica se é um número e se está na faixa permitida (14M a 17M)
+    if ordem_input.isdigit():
+        num_ordem = int(ordem_input)
+        if 14000000 <= num_ordem <= 17000000:
+            ordem_valida_por_faixa = True
+
+    # 2. Tenta buscar o nome da atividade no Banco de Dados
+    if operacao_input:
+        res = df_ordens[(df_ordens['Ordem'].astype(str).str.strip() == ordem_input.strip()) & 
+                        (df_ordens['Operação'].astype(str).str.strip() == operacao_input.strip())]
+        if not res.empty:
+            nome_atividade = res['Txt.breve operação'].values[0]
+            st.success(f"📌 Atividade: {nome_atividade}")
+        elif ordem_valida_por_faixa:
+            st.info("ℹ️ Ordem não encontrada no BD, mas está na faixa permitida (14M-17M). Gravação liberada.")
+        else:
+            st.warning("⚠️ Ordem fora da faixa permitida ou não encontrada no banco.")
 
 c_data, c_btn = st.columns([2, 1])
 data_ativ = c_data.date_input("Data da Atividade", datetime.now(), format="DD/MM/YYYY")
@@ -104,8 +119,10 @@ descricao = st.text_area("Descrição da Atividade")
 
 if st.button("Gravar Apontamento", use_container_width=True):
     regex_hora = r"^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$"
-    if not nome_atividade:
-        st.error("Erro: Ordem inválida.")
+    
+    # Validação Final: Aceita se tiver nome da atividade OU se estiver na faixa numérica
+    if not nome_atividade and not ordem_valida_por_faixa:
+        st.error("Erro: A ordem informada é inválida ou está fora da faixa permitida.")
     elif not re.match(regex_hora, h_inicio) or not re.match(regex_hora, h_fim):
         st.error("Formato de hora inválido.")
     else:
@@ -139,7 +156,7 @@ if st.button("Gravar Apontamento", use_container_width=True):
         except Exception as e:
             st.error(f"Erro ao salvar: {e}")
 
-# --- BOTÃO DE DOWNLOAD (NOVIDADE) ---
+# --- BOTÃO DE DOWNLOAD ---
 st.divider()
 st.subheader("📦 Gestão de Dados")
 try:
@@ -151,5 +168,5 @@ try:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
-except Exception as e:
-    st.warning("Aguardando o primeiro apontamento para gerar o download.")
+except:
+    pass
