@@ -7,7 +7,7 @@ import os
 # Configuração da Página
 st.set_page_config(page_title="Apontamento Raízen", page_icon="⚙️", layout="centered")
 
-# Caminho absoluto para garantir que o Python não salve em pastas temporárias
+# Caminho absoluto para garantir que salve no local correto
 diretorio_atual = os.path.dirname(os.path.abspath(__file__))
 caminho_excel = os.path.join(diretorio_atual, "Manutencao_App.xlsx")
 
@@ -16,7 +16,6 @@ caminho_excel = os.path.join(diretorio_atual, "Manutencao_App.xlsx")
 @st.cache_data
 def carregar_dados():
     try:
-        # Carregamos as abas de referência
         df_colab = pd.read_excel(caminho_excel, sheet_name="Colaboradores")
         df_ordens = pd.read_excel(caminho_excel, sheet_name="BDOrdens")
         df_colab.columns = df_colab.columns.str.strip()
@@ -32,7 +31,7 @@ def converter_para_horas(txt_hora):
     except:
         return 0
 
-# --- DIALOG (POP-UP) DE RESUMO ---
+# --- DIALOG (POP-UP) DE RESUMO CORRIGIDO ---
 
 @st.dialog("Resumo de Apontamentos")
 def mostrar_resumo(colaborador, data_selecionada):
@@ -42,22 +41,23 @@ def mostrar_resumo(colaborador, data_selecionada):
 
     try:
         df_apont = pd.read_excel(caminho_excel, sheet_name="Apontamentos")
-        # Tratamento de data para comparação
-        df_apont['Data Atividade'] = pd.to_datetime(df_apont['Data Atividade'], dayfirst=True).dt.date
         
-        filtro = df_apont[(df_apont['Nome Colaborador'] == colaborador) & (df_apont['Data Atividade'] == data_selecionada)].copy()
+        # Sincronizado com o nome da coluna na sua foto: 'Data'
+        df_apont['Data'] = pd.to_datetime(df_apont['Data'], dayfirst=True).dt.date
+        
+        filtro = df_apont[(df_apont['Colaborador'] == colaborador) & (df_apont['Data'] == data_selecionada)].copy()
 
         if not filtro.empty:
-            # Limpeza visual de números para o resumo
-            filtro['Numero Ordem'] = filtro['Numero Ordem'].fillna(0).astype(int).astype(str)
-            filtro['Operacao Ordem'] = filtro['Operacao Ordem'].fillna(0).astype(int).astype(str)
+            # Limpeza de formato para exibição
+            filtro['Ordem'] = filtro['Ordem'].fillna(0).astype(int).astype(str)
+            filtro['Operação'] = filtro['Operação'].fillna(0).astype(int).astype(str)
             
-            st.table(filtro[['Numero Ordem', 'Operacao Ordem', 'Hora Inicio', 'Hora Fim', 'Porcentagem Executada']])
+            st.table(filtro[['Ordem', 'Operação', 'Início', 'Fim', 'Progresso']])
             
             total_horas = 0
             for _, row in filtro.iterrows():
-                ini = converter_para_horas(row['Hora Inicio'])
-                fim = converter_para_horas(row['Hora Fim'])
+                ini = converter_para_horas(row['Início'])
+                fim = converter_para_horas(row['Fim'])
                 total_horas += (fim - ini)
             
             st.metric("Total de Horas no Dia", f"{total_horas:.2f} h")
@@ -103,7 +103,7 @@ h_fim = c_h2.text_input("Fim (HH:MM)", placeholder="17:00")
 andamento = st.slider("Porcentagem Executada", 0, 100, step=5)
 descricao = st.text_area("Descrição da Atividade")
 
-# --- BOTÃO GRAVAR (VERSÃO REESCRITA COMPLETA) ---
+# --- BOTÃO GRAVAR (REESCREVENDO O ARQUIVO COMPLETO) ---
 
 if st.button("Gravar Apontamento", use_container_width=True):
     regex_hora = r"^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$"
@@ -113,21 +113,22 @@ if st.button("Gravar Apontamento", use_container_width=True):
     elif not re.match(regex_hora, h_inicio) or not re.match(regex_hora, h_fim):
         st.error("Formato de hora inválido.")
     else:
+        # Dicionário com nomes curtos idênticos à sua planilha
         novo_dado = {
             "Oficina": [oficina], 
-            "Nome Colaborador": [colaborador], 
-            "Numero Ordem": [ordem_input],
-            "Operacao Ordem": [operacao_input], 
-            "Data Atividade": [data_ativ.strftime('%d/%m/%Y')],
-            "Hora Inicio": [h_inicio], 
-            "Hora Fim": [h_fim], 
-            "Porcentagem Executada": [f"{andamento}%"], 
-            "Descricao Atividade": [descricao]
+            "Colaborador": [colaborador], 
+            "Ordem": [ordem_input],
+            "Operação": [operacao_input], 
+            "Data": [data_ativ.strftime('%d/%m/%Y')],
+            "Início": [h_inicio], 
+            "Fim": [h_fim], 
+            "Progresso": [f"{andamento}%"], 
+            "Descrição": [descricao]
         }
         df_novo = pd.DataFrame(novo_dado)
         
         try:
-            # 1. Carregamos TODAS as abas para não perder dados
+            # 1. Carrega todas as abas para não deletar nada por acidente
             with pd.ExcelFile(caminho_excel) as xls:
                 df_colab_orig = pd.read_excel(xls, "Colaboradores")
                 df_ordens_orig = pd.read_excel(xls, "BDOrdens")
@@ -136,23 +137,22 @@ if st.button("Gravar Apontamento", use_container_width=True):
                 except:
                     df_apont_atual = pd.DataFrame(columns=novo_dado.keys())
             
-            # 2. Concatenamos os novos dados
+            # 2. Adiciona o novo registro
             df_apont_final = pd.concat([df_apont_atual, df_novo], ignore_index=True)
             
-            # Limpeza da coluna do PowerApps
+            # Limpa lixo do PowerApps se houver
             if "__PowerAppsId__" in df_apont_final.columns:
                 df_apont_final = df_apont_final.drop(columns=["__PowerAppsId__"])
 
-            # 3. Reescrevemos o arquivo inteiro com todas as abas
-            # Isso mata o problema de permissão do ExcelWriter modo append
+            # 3. Salva o arquivo inteiro do zero (Sobrescrever)
             with pd.ExcelWriter(caminho_excel, engine="openpyxl") as writer:
                 df_apont_final.to_excel(writer, sheet_name="Apontamentos", index=False)
                 df_colab_orig.to_excel(writer, sheet_name="Colaboradores", index=False)
                 df_ordens_orig.to_excel(writer, sheet_name="BDOrdens", index=False)
             
             st.balloons()
-            st.success("Salvo com sucesso! O arquivo foi atualizado.")
-            st.cache_data.clear() # Limpa o cache para atualizar o resumo
+            st.success("Salvo com sucesso!")
+            st.cache_data.clear() # Força o app a ler o arquivo de novo no próximo resumo
             
         except Exception as e:
-            st.error(f"ERRO CRÍTICO: Certifique-se de que o Excel está FECHADO. Erro: {e}")
+            st.error(f"FECHE O EXCEL/OPENOFFICE! Erro: {e}")
